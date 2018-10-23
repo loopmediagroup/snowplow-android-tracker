@@ -1,13 +1,17 @@
 apply plugin: 'com.android.application'
 
+project.ext {
+    archLifecycleVersion = "1.1.1"
+}
+
 android {
-    compileSdkVersion 24
-    buildToolsVersion '23.0.3'
+    compileSdkVersion 28
+    buildToolsVersion '28.0.3'
 
     defaultConfig {
         applicationId "com.snowplowanalytics.snowplowtrackerdemo"
-        minSdkVersion 14
-        targetSdkVersion 24
+        minSdkVersion 15
+        targetSdkVersion 26
         versionCode 3
         versionName "0.3.0"
     }
@@ -25,8 +29,9 @@ android {
 }
 
 dependencies {
-    compile fileTree(dir: 'libs', include: ['*.jar'])
-    compile project(':snowplow-android-tracker')
-    compile 'com.google.android.gms:play-services-analytics:9.0.2'
-    compile 'com.android.support:appcompat-v7:24.0.0'
+    implementation "android.arch.lifecycle:extensions:$project.archLifecycleVersion"
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    implementation project(':snowplow-android-tracker')
+    implementation 'com.android.support:customtabs:27.1.1'
+    implementation 'com.android.support:appcompat-v7:27.1.1'
 }
