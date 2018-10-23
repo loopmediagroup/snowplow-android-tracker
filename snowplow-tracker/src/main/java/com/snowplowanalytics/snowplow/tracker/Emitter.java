@@ -15,41 +15,19 @@ package com.snowplowanalytics.snowplow.tracker;
 
 import android.content.Context;
 import android.net.Uri;
-
 import com.snowplowanalytics.snowplow.tracker.constants.Parameters;
 import com.snowplowanalytics.snowplow.tracker.constants.TrackerConstants;
-import com.snowplowanalytics.snowplow.tracker.emitter.BufferOption;
-import com.snowplowanalytics.snowplow.tracker.emitter.HttpMethod;
-import com.snowplowanalytics.snowplow.tracker.emitter.ReadyRequest;
-import com.snowplowanalytics.snowplow.tracker.emitter.RequestCallback;
-import com.snowplowanalytics.snowplow.tracker.emitter.RequestSecurity;
-import com.snowplowanalytics.snowplow.tracker.emitter.TLSArguments;
-import com.snowplowanalytics.snowplow.tracker.emitter.TLSVersion;
+import com.snowplowanalytics.snowplow.tracker.emitter.*;
 import com.snowplowanalytics.snowplow.tracker.payload.Payload;
+import com.snowplowanalytics.snowplow.tracker.payload.SelfDescribingJson;
 import com.snowplowanalytics.snowplow.tracker.storage.EventStore;
 import com.snowplowanalytics.snowplow.tracker.utils.Logger;
-import com.snowplowanalytics.snowplow.tracker.emitter.RequestResult;
-import com.snowplowanalytics.snowplow.tracker.payload.SelfDescribingJson;
-import com.snowplowanalytics.snowplow.tracker.emitter.EmittableEvents;
 import com.snowplowanalytics.snowplow.tracker.utils.Util;
-
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
+import okhttp3.*;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.Map;
-import java.util.EnumSet;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -103,9 +81,10 @@ public class Emitter {
         long byteLimitGet = 40000; // Optional
         long byteLimitPost = 40000; // Optional
         TimeUnit timeUnit = TimeUnit.SECONDS;
+        OkHttpClient client = null; // Optional
 
         /**
-         * @param uri The uri of the collector
+         * @param uri     The uri of the collector
          * @param context the android context
          */
         public EmitterBuilder(String uri, Context context) {
@@ -225,6 +204,17 @@ public class Emitter {
         }
 
         /**
+         * @param client An OkHttp client that will be used in the emitter, you can provide your
+         *               own if you want to share your Singleton client's interceptors, connection pool etc..
+         *               ,otherwise a new one is created.
+         * @return itself
+         */
+        public EmitterBuilder client(OkHttpClient client) {
+            this.client = client;
+            return this;
+        }
+
+        /**
          * Creates a new Emitter
          *
          * @return a new Emitter object
@@ -258,9 +248,15 @@ public class Emitter {
         TLSArguments tlsArguments = new TLSArguments(this.tlsVersions);
         buildEmitterUri();
 
-        client = new OkHttpClient.Builder()
-                .sslSocketFactory(tlsArguments.getSslSocketFactory(),
-                        tlsArguments.getTrustManager())
+        final OkHttpClient.Builder clientBuilder;
+        if (builder.client == null) {
+            clientBuilder = new OkHttpClient.Builder();
+        } else {
+            clientBuilder = builder.client.newBuilder();
+        }
+
+        client = clientBuilder.sslSocketFactory(tlsArguments.getSslSocketFactory(),
+                tlsArguments.getTrustManager())
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(15, TimeUnit.SECONDS)
                 .build();
@@ -274,14 +270,12 @@ public class Emitter {
     private void buildEmitterUri() {
         if (this.requestSecurity == RequestSecurity.HTTP) {
             this.uriBuilder = Uri.parse("http://" + this.uri).buildUpon();
-        }
-        else {
+        } else {
             this.uriBuilder = Uri.parse("https://" + this.uri).buildUpon();
         }
         if (this.httpMethod == HttpMethod.GET) {
             uriBuilder.appendPath("i");
-        }
-        else {
+        } else {
             uriBuilder.appendEncodedPath(TrackerConstants.PROTOCOL_VENDOR + "/" +
                     TrackerConstants.PROTOCOL_VERSION);
         }
@@ -335,16 +329,16 @@ public class Emitter {
     /**
      * Attempts to send events in the database to
      * a collector.
-     *
+     * <p>
      * - If the emitter is not online it will not send
      * - If the emitter is online but there are no events:
-     *   + Increment empty counter until emptyLimit reached
-     *   + Incurs a backoff period between empty counters
+     * + Increment empty counter until emptyLimit reached
+     * + Incurs a backoff period between empty counters
      * - If the emitter is online and we have events:
-     *   + Pulls allowed amount of events from database and
-     *     attempts to send.
-     *   + If there are failures resets running state
-     *   + Otherwise will attempt to emit again
+     * + Pulls allowed amount of events from database and
+     * attempts to send.
+     * + If there are failures resets running state
+     * + Otherwise will attempt to emit again
      */
     @SuppressWarnings("all")
     private void attemptEmit() {
@@ -560,9 +554,8 @@ public class Emitter {
                         reqEventId.add(eventIds.get(j));
                         Request request = requestBuilderPost(singlePayloadMap);
                         requests.add(new ReadyRequest(true, request, reqEventId));
-                    }
-                    else if ((totalByteSize + payloadByteSize + POST_WRAPPER_BYTES +
-                            (postPayloadMaps.size() -1)) > byteLimitPost) {
+                    } else if ((totalByteSize + payloadByteSize + POST_WRAPPER_BYTES +
+                            (postPayloadMaps.size() - 1)) > byteLimitPost) {
                         Request request = requestBuilderPost(postPayloadMaps);
                         requests.add(new ReadyRequest(false, request, reqEventIds));
 
@@ -574,8 +567,7 @@ public class Emitter {
                         postPayloadMaps.add(payload);
                         reqEventIds.add(eventIds.get(j));
                         totalByteSize = payloadByteSize;
-                    }
-                    else {
+                    } else {
                         totalByteSize += payloadByteSize;
                         postPayloadMaps.add(payload);
                         reqEventIds.add(eventIds.get(j));
@@ -597,6 +589,7 @@ public class Emitter {
     /**
      * Builds an OkHttp GET request which is ready
      * to be executed.
+     *
      * @param payload The payload to be sent in the
      *                request.
      * @return an OkHttp request object
@@ -627,6 +620,7 @@ public class Emitter {
     /**
      * Builds an OkHttp POST request which is ready
      * to be executed.
+     *
      * @param payloads The payloads to be sent in the
      *                 request.
      * @return an OkHttp request object
@@ -653,7 +647,7 @@ public class Emitter {
      * Adds the Sending Time (stm) field
      * to each event payload.
      *
-     * @param payload The payload to append the field to
+     * @param payload   The payload to append the field to
      * @param timestamp An optional timestamp String
      */
     private void addStmToEvent(Payload payload, String timestamp) {
@@ -787,7 +781,7 @@ public class Emitter {
 
     /**
      * @return the amount of times the event store can be empty
-     *         before it is shutdown.
+     * before it is shutdown.
      */
     public int getEmptyLimit() {
         return this.emptyLimit;
